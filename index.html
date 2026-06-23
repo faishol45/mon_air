@@ -106,6 +106,30 @@
             margin: 5px 0 15px 0;
         }
 
+        /* Filter Tanggal */
+        .filter-area {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 15px;
+            border-radius: 8px;
+            flex-wrap: wrap;
+        }
+
+        .filter-area label {
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .filter-area input[type="date"] {
+            width: auto;
+            margin: 0;
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+
         button {
             width: 100%;
             padding: 15px;
@@ -117,6 +141,13 @@
             font-weight: bold;
             cursor: pointer;
             transition: 0.2s;
+        }
+
+        .btn-inline {
+            width: auto;
+            padding: 9px 20px;
+            border-radius: 8px;
+            font-size: 14px;
         }
 
         button:hover {
@@ -214,20 +245,28 @@
     </div>
 
     <div class="card card-wide">
-        <h2>📜 Riwayat Aktivitas (Log 10 Menit)</h2>
+        <h2>📜 Lihat Riwayat Data (Database Cloud)</h2>
+        
+        <div class="filter-area">
+            <label for="filterDate">Pilih Tanggal:</label>
+            <input type="date" id="filterDate">
+            <button class="btn-inline" onclick="ambilRiwayatDatabase()">Cari Data</button>
+        </div>
+
         <div style="overflow-x: auto;">
             <table>
                 <thead>
                     <tr>
                         <th>Tanggal & Waktu</th>
                         <th>pH</th>
-                        <th>Kekeruhan</th>
+                        <th>Kekeruhan (NTU)</th>
                         <th>Level (cm)</th>
                         <th>Relay 1</th>
                         <th>Relay 2</th>
                     </tr>
                 </thead>
                 <tbody id="historyBody">
+                    <tr><td colspan="6" style="text-align:center; opacity:0.5;">Silakan pilih tanggal dan klik Cari Data.</td></tr>
                 </tbody>
             </table>
         </div>
@@ -240,7 +279,10 @@
 </div>
 
 <script>
-    /* ===== KONFIGURASI MQTT ===== */
+    /* ===== KONFIGURASI HOSTING URL & MQTT ===== */
+    // GANTI dengan URL Hosting Back-end Anda (misal dari Render / Railway) saat production
+    const BACKEND_URL = "http://localhost:3000"; 
+
     const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt", {
         keepalive: 60,
         reconnectPeriod: 2000,
@@ -264,12 +306,12 @@
         turbMax: document.getElementById("turbMax"),
         h1: document.getElementById("h1"),
         h2: document.getElementById("h2"),
-        history: document.getElementById("historyBody")
+        history: document.getElementById("historyBody"),
+        filterDate: document.getElementById("filterDate")
     };
 
-    let terakhirSimpanTabel = 0; 
-    const JEDA_SIMPAN = 10 * 60 * 1000; // 10 menit
-    const MAX_LOGS = 20;
+    // Set kalender default ke hari ini
+    el.filterDate.value = new Date().toISOString().split('T')[0];
 
     /* ===== LOAD SETTING TERSIMPAN ===== */
     const saved = localStorage.getItem(LS_KEY);
@@ -289,6 +331,7 @@
         el.conn.style.color = "#36e2c2";
         client.subscribe(topicData);
         client.subscribe(topicSet);
+        ambilRiwayatDatabase(); // Ambil riwayat hari ini otomatis
     });
 
     client.on("offline", () => {
@@ -298,9 +341,7 @@
 
     client.on("message", (topic, message) => {
         let payload;
-        try { 
-            payload = JSON.parse(message.toString()); 
-        } catch (e) { return; }
+        try { payload = JSON.parse(message.toString()); } catch (e) { return; }
 
         if (topic === topicData) {
             let phVal = parseFloat(payload.ph);
@@ -319,12 +360,6 @@
                 el.r2.innerText = payload.r2 ? "AKTIF" : "MATI";
                 el.r2.className = "status " + (payload.r2 ? "on" : "off");
             }
-
-            const sekarang = Date.now();
-            if (sekarang - terakhirSimpanTabel >= JEDA_SIMPAN) {
-                tambahRiwayat(phVal, turbVal, levelVal, payload.r1, payload.r2);
-                terakhirSimpanTabel = sekarang;
-            }
         }
 
         if (topic === topicSet) {
@@ -336,24 +371,43 @@
         }
     });
 
-    function tambahRiwayat(ph, turb, level, r1, r2) {
-        const now = new Date();
-        const timeStr = now.toLocaleDateString('id-ID') + " " + now.toLocaleTimeString('id-ID');
+    /* ===== FETCH RIWAYAT DARI DATABASE VIA BACK-END ===== */
+    function ambilRiwayatDatabase() {
+        const tgl = el.filterDate.value;
+        if (!tgl) return alert("Pilih tanggal terlebih dahulu!");
 
-        const row = document.createElement("tr");
-        row.innerHTML = `
-            <td>${timeStr}</td>
-            <td>${!isNaN(ph) ? ph.toFixed(2) : "--"}</td>
-            <td>${turb !== undefined ? turb : "--"}</td> 
-            <td>${level !== undefined && !isNaN(level) ? level : "--"}</td>
-            <td class="${r1 ? 'log-on' : 'log-off'}">${r1 ? 'AKTIF' : 'MATI'}</td>
-            <td class="${r2 ? 'log-on' : 'log-off'}">${r2 ? 'AKTIF' : 'MATI'}</td>
-        `;
+        el.history.innerHTML = `<tr><td colspan="6" style="text-align:center; opacity:0.5;">Memuat data dari database cloud...</td></tr>`;
 
-        el.history.insertBefore(row, el.history.firstChild);
-        if (el.history.children.length > MAX_LOGS) {
-            el.history.removeChild(el.history.lastChild);
-        }
+        fetch(`${BACKEND_URL}/api/riwayat?tanggal=${tgl}`)
+            .then(res => {
+                if (!res.ok) throw new Error("Gagal mengambil data dari server");
+                return res.json();
+            })
+            .then(data => {
+                el.history.innerHTML = "";
+                if (data.length === 0) {
+                    el.history.innerHTML = `<tr><td colspan="6" style="text-align:center; opacity:0.5;">📭 Tidak ada rekaman data pada tanggal ${tgl}</td></tr>`;
+                    return;
+                }
+
+                data.forEach(row => {
+                    const tglWaktu = new Date(row.waktu).toLocaleString('id-ID');
+                    const tr = document.createElement("tr");
+                    tr.innerHTML = `
+                        <td>${tglWaktu}</td>
+                        <td>${parseFloat(row.ph).toFixed(2)}</td>
+                        <td>${row.kekeruhan}</td>
+                        <td>${row.level_air}</td>
+                        <td class="${row.relay1 ? 'log-on' : 'log-off'}">${row.relay1 ? 'AKTIF' : 'MATI'}</td>
+                        <td class="${row.relay2 ? 'log-on' : 'log-off'}">${row.relay2 ? 'AKTIF' : 'MATI'}</td>
+                    `;
+                    el.history.appendChild(tr);
+                });
+            })
+            .catch(err => {
+                console.error(err);
+                el.history.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--danger);">⚠️ Gagal memuat data database. Pastikan backend aktif.</td></tr>`;
+            });
     }
 
     function kirim() {
