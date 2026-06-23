@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard Monitoring Air</title>
+
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+    <style>
+        /* 1. VARIABEL WARNA */
+        :root {
+            --bg: #071426;
+            --card: #0f1f3d;
+            --accent: #36e2c2;
+            --danger: #ff5c5c;
+            --warning: #f1c40f;
+            --ok: #2ecc71;
+            --text: #eaf2ff;
+        }
+
+        /* 2. RESET DASAR */
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        /* 3. HEADER & LAYOUT */
+        header {
+            padding: 20px;
+            text-align: center;
+            background: linear-gradient(90deg, #0f2a5f, #0b3d91);
+            border-bottom: 2px solid var(--accent);
+        }
+
+        header h1 {
+            margin: 0;
+            color: var(--accent);
+            text-shadow: 0 0 10px rgba(54, 226, 194, 0.3);
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            padding: 25px;
+        }
+
+        /* 4. CARD DESIGN */
+        .card {
+            background: var(--card);
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,.3);
+            transition: transform 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+        }
+
+        .card h2 {
+            margin-top: 0;
+            color: var(--accent);
+            font-size: 18px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 10px;
+        }
+
+        /* 5. VALUES & LABELS */
+        .value {
+            font-size: 32px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .label {
+            opacity: .7;
+            font-size: 14px;
+        }
+
+        /* 6. STATUS & BUTTONS */
+        .status {
+            font-size: 14px;
+            font-weight: bold;
+            padding: 6px 15px;
+            border-radius: 20px;
+            display: inline-block;
+            text-transform: uppercase;
+        }
+
+        .on { background: var(--ok); color: #000; }
+        .off { background: var(--danger); color: #fff; }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(0,0,0,0.2);
+            color: #fff;
+            margin: 5px 0 15px 0;
+        }
+
+        button {
+            width: 100%;
+            padding: 15px;
+            border-radius: 12px;
+            border: none;
+            background: var(--accent);
+            color: #000;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        button:hover {
+            filter: brightness(1.2);
+            box-shadow: 0 0 15px var(--accent);
+        }
+
+        /* 7. STYLE TABEL RIWAYAT */
+        .card-wide {
+            grid-column: 1 / -1; 
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        th {
+            background: var(--accent);
+            color: #000;
+            font-size: 14px;
+        }
+
+        tr:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .log-on { color: var(--ok); font-weight: bold; }
+        .log-off { opacity: 0.5; }
+
+        /* 8. FOOTER */
+        .footer {
+            text-align: center;
+            padding: 30px;
+            opacity: .5;
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+
+<header>
+    <h1>🌊 Dashboard Monitoring Kualitas Air</h1>
+    <p id="conn">Menghubungkan MQTT...</p>
+</header>
+
+<div class="container">
+
+    <div class="card">
+        <h2>📊 Data Sensor (Real-Time)</h2>
+        <p class="label">pH Air</p>
+        <div class="value" id="ph">--</div>
+
+        <p class="label">Kekeruhan (NTU)</p>
+        <div class="value" id="turb">--</div>
+
+        <p class="label">Ketinggian Air (cm)</p>
+        <div class="value" id="level">--</div>
+    </div>
+
+    <div class="card">
+        <h2>⚙ Status Sistem</h2>
+        <p>Relay 1 (Pompa Filter): <span id="r1" class="status off">OFF</span></p>
+        <p>Relay 2 (Kran Utama): <span id="r2" class="status off">OFF</span></p>
+    </div>
+
+    <div class="card">
+        <h2>🧪 Batas Kualitas Air</h2>
+        pH Minimum
+        <input id="phMin" type="number" step="0.1" value="6.5">
+        pH Maksimum
+        <input id="phMax" type="number" step="0.1" value="8.5">
+        Kekeruhan Maks (NTU)
+        <input id="turbMax" type="number" value="50">
+    </div>
+
+    <div class="card">
+        <h2>📏 Batas Ketinggian Air</h2>
+        H1 (Batas Bawah - cm)
+        <input id="h1" type="number" value="10">
+        H2 (Batas Atas - cm)
+        <input id="h2" type="number" value="50">
+
+        <button onclick="kirim()">SIMPAN PENGATURAN</button>
+    </div>
+
+    <div class="card card-wide">
+        <h2>📜 Riwayat Aktivitas (Log 10 Menit)</h2>
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tanggal & Waktu</th>
+                        <th>pH</th>
+                        <th>Kekeruhan</th>
+                        <th>Level (cm)</th>
+                        <th>Relay 1</th>
+                        <th>Relay 2</th>
+                    </tr>
+                </thead>
+                <tbody id="historyBody">
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<div class="footer">
+    IoT Water Monitoring © 2026
+</div>
+
+<script>
+    /* ===== KONFIGURASI MQTT ===== */
+    const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt", {
+        keepalive: 60,
+        reconnectPeriod: 2000,
+        clean: true,
+        clientId: 'web_client_' + Math.random().toString(16).substr(2, 8)
+    });
+
+    const topicData = "air/monitoring/data_baru";
+    const topicSet  = "air/monitoring/setting";
+    const LS_KEY    = "air_setting_last";
+
+    const el = {
+        ph: document.getElementById("ph"),
+        turb: document.getElementById("turb"),
+        level: document.getElementById("level"),
+        r1: document.getElementById("r1"),
+        r2: document.getElementById("r2"),
+        conn: document.getElementById("conn"),
+        phMin: document.getElementById("phMin"),
+        phMax: document.getElementById("phMax"),
+        turbMax: document.getElementById("turbMax"),
+        h1: document.getElementById("h1"),
+        h2: document.getElementById("h2"),
+        history: document.getElementById("historyBody")
+    };
+
+    let terakhirSimpanTabel = 0; 
+    const JEDA_SIMPAN = 10 * 60 * 1000; // 10 menit
+    const MAX_LOGS = 20;
+
+    /* ===== LOAD SETTING TERSIMPAN ===== */
+    const saved = localStorage.getItem(LS_KEY);
+    if (saved) {
+        try {
+            const s = JSON.parse(saved);
+            el.phMin.value   = s.phMin;
+            el.phMax.value   = s.phMax;
+            el.turbMax.value = s.turbMax;
+            el.h1.value      = s.h1;
+            el.h2.value      = s.h2;
+        } catch (e) { console.error("Gagal load setting", e); }
+    }
+
+    client.on("connect", () => {
+        el.conn.innerText = "🟢 Terhubung ke Sistem";
+        el.conn.style.color = "#36e2c2";
+        client.subscribe(topicData);
+        client.subscribe(topicSet);
+    });
+
+    client.on("offline", () => {
+        el.conn.innerText = "🔴 Alat Tidak Terdeteksi (Offline)";
+        el.conn.style.color = "#ff5c5c";
+    });
+
+    client.on("message", (topic, message) => {
+        let payload;
+        try { 
+            payload = JSON.parse(message.toString()); 
+        } catch (e) { return; }
+
+        if (topic === topicData) {
+            let phVal = parseFloat(payload.ph);
+            let turbVal = parseInt(payload.turb);
+            let levelVal = parseInt(payload.level);
+            
+            el.ph.innerText = !isNaN(phVal) ? phVal.toFixed(2) : "--";
+            el.turb.innerText = !isNaN(turbVal) ? turbVal : "--";
+            el.level.innerText = !isNaN(levelVal) ? levelVal : "--";
+
+            if (payload.r1 !== undefined) {
+                el.r1.innerText = payload.r1 ? "AKTIF" : "MATI";
+                el.r1.className = "status " + (payload.r1 ? "on" : "off");
+            }
+            if (payload.r2 !== undefined) {
+                el.r2.innerText = payload.r2 ? "AKTIF" : "MATI";
+                el.r2.className = "status " + (payload.r2 ? "on" : "off");
+            }
+
+            const sekarang = Date.now();
+            if (sekarang - terakhirSimpanTabel >= JEDA_SIMPAN) {
+                tambahRiwayat(phVal, turbVal, levelVal, payload.r1, payload.r2);
+                terakhirSimpanTabel = sekarang;
+            }
+        }
+
+        if (topic === topicSet) {
+            if (payload.phMin != null)   el.phMin.value   = payload.phMin;
+            if (payload.phMax != null)   el.phMax.value   = payload.phMax;
+            if (payload.turbMax != null) el.turbMax.value = payload.turbMax;
+            if (payload.h1 != null)      el.h1.value      = payload.h1;
+            if (payload.h2 != null)      el.h2.value      = payload.h2;
+        }
+    });
+
+    function tambahRiwayat(ph, turb, level, r1, r2) {
+        const now = new Date();
+        const timeStr = now.toLocaleDateString('id-ID') + " " + now.toLocaleTimeString('id-ID');
+
+        const row = document.createElement("tr");
+        row.innerHTML = `
+            <td>${timeStr}</td>
+            <td>${!isNaN(ph) ? ph.toFixed(2) : "--"}</td>
+            <td>${turb !== undefined ? turb : "--"}</td> 
+            <td>${level !== undefined && !isNaN(level) ? level : "--"}</td>
+            <td class="${r1 ? 'log-on' : 'log-off'}">${r1 ? 'AKTIF' : 'MATI'}</td>
+            <td class="${r2 ? 'log-on' : 'log-off'}">${r2 ? 'AKTIF' : 'MATI'}</td>
+        `;
+
+        el.history.insertBefore(row, el.history.firstChild);
+        if (el.history.children.length > MAX_LOGS) {
+            el.history.removeChild(el.history.lastChild);
+        }
+    }
+
+    function kirim() {
+        const data = {
+            phMin:   parseFloat(el.phMin.value),
+            phMax:   parseFloat(el.phMax.value),
+            turbMax: parseInt(el.turbMax.value) || 0,
+            h1:      parseInt(el.h1.value),
+            h2:      parseInt(el.h2.value)
+        };
+
+        if (isNaN(data.phMin) || isNaN(data.phMax) || isNaN(data.h1) || isNaN(data.h2) || isNaN(data.turbMax)) {
+            alert("Mohon isi semua parameter angka!");
+            return;
+        }
+
+        client.publish(topicSet, JSON.stringify(data), { qos: 1, retain: true }, (err) => {
+            if (!err) {
+                alert("✅ Pengaturan Berhasil Dikirim!");
+                localStorage.setItem(LS_KEY, JSON.stringify(data));
+            } else {
+                alert("❌ Gagal mengirim: " + err);
+            }
+        });
+    }
+</script>
+
+</body>
+</html>
